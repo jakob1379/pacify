@@ -11,4 +11,10 @@ dependencies = [
     "pyqt6>=6.10.0",
     "seaborn>=0.13.2",
     "scipy>=1.15.1",
+    "ipython>=9.7.0",
+    "polars>=1.35.2",
+    "hvplot>=0.12.1",
+    "altair>=6.0.0",
+    "vegafusion>=2.0.3",
+    "vl-convert-python>=1.8.0",
 ]
