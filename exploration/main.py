@@ -12,15 +12,20 @@ from scipy.fft import rfft, rfftfreq
 # --- CONSTANTS ---
 SAMPLE_RATE = 50.0          # 50 Hz
 DT = 1.0 / SAMPLE_RATE      # 0.02 seconds per sample
-WINDOW_SECONDS = 10.0       # View window
-MAX_SAMPLES = int(WINDOW_SECONDS * SAMPLE_RATE) # 500 samples
+WINDOW_SECONDS = 5.0       # View window
+MAX_SAMPLES = int(WINDOW_SECONDS * SAMPLE_RATE) # 250 samples
+PAUSE_SECONDS = 15.0        # Pause duration
+
+# --- State Machine ---
+SAMPLING = "sampling"
+PAUSED = "paused"
 
 def generate_running_acceleration(
     target_cadence_low: float = 170.0,
     target_cadence_high: float = 180.0
 ) -> Iterator[tuple[float, float]]:
     """
-    Generates simulated linear acceleration (m/s^2) at 50Hz.
+    Generates simulated linear acceleration (m/s^2) aht 50Hz.
     Uses Phase Accumulation to prevent signal destruction over time.
     """
     t: float = 0.0
@@ -74,20 +79,34 @@ def run_visualization() -> None:
     x_data: list[float] = []
     y_data: list[float] = []
 
+    # --- State Management ---
+    current_state = SAMPLING
+    last_switch_time = 0
+
     # Generator instance
     stream = generate_running_acceleration()
-
-    # --- Pre-populate data ---
-    for _ in range(MAX_SAMPLES):
-        t, a, _ = next(stream)
-        x_data.append(t)
-        y_data.append(a)
 
     # Setup Plot
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), constrained_layout=True,
                                    facecolor='#1e1e1e')
     (line,) = ax1.plot([], [], lw=1.0, color="#00ffcc")
     (fft_line,) = ax2.plot([], [], lw=1.0, color="#ffaa00")
+    # Vertical line to mark the dominant frequency
+    (peak_line,) = ax2.plot([], [], color="#ff5555", lw=2, linestyle="--", zorder=3)
+    # Text for dominant frequency
+    peak_text = ax2.text(
+        0.0, 0.0, "", color="white", fontsize=10, ha="center", va="bottom"
+    )
+    # Text for current state
+    state_text = ax1.text(
+        0.5,
+        1.05,
+        "",
+        transform=ax1.transAxes,
+        color="white",
+        fontsize=14,
+        ha="center",
+    )
 
     cadence_text = ax1.text(0.02, 0.95, "", transform=ax1.transAxes,
         color="white", fontsize=12, verticalalignment="top")
@@ -121,55 +140,84 @@ def run_visualization() -> None:
 
     fig.patch.set_facecolor("#1e1e1e")
 
-    def init() -> tuple[plt.Line2D, plt.Line2D, plt.Text]:
+    def init() -> tuple:
         line.set_data([], [])
         fft_line.set_data([], [])
+        peak_line.set_data([], [])
+        peak_text.set_text("")
         cadence_text.set_text("")
-        return line, fft_line, cadence_text
+        state_text.set_text("")
+        return line, fft_line, peak_line, peak_text, cadence_text, state_text
 
-    def update(frame: int) -> tuple[plt.Line2D, plt.Line2D, plt.Text]:
-        # Get next sample
+    def update(frame: int) -> tuple:
+        nonlocal current_state, last_switch_time
+
+        # Always get the next sample to keep the simulation running
         t, a, actual_cadence = next(stream)
 
-        x_data.append(t)
-        y_data.append(a)
+        # --- State Machine Logic ---
+        elapsed_time = t - last_switch_time
 
-        if len(x_data) > MAX_SAMPLES:
-            x_data.pop(0)
-            y_data.pop(0)
+        if current_state == SAMPLING and elapsed_time > WINDOW_SECONDS:
+            current_state = PAUSED
+            last_switch_time = t
+            x_data.clear()
+            y_data.clear()
+        elif current_state == PAUSED and elapsed_time > PAUSE_SECONDS:
+            current_state = SAMPLING
+            last_switch_time = t
 
-        # --- Time Domain Plot ---
-        line.set_data(x_data, y_data)
-        cadence_text.set_text(f"Simulated Input: {actual_cadence:.1f} SPM")
+        state_text.set_text(f"STATE: {current_state.upper()}")
 
-        if x_data:
-            curr_time = x_data[-1]
-            if curr_time > WINDOW_SECONDS:
-                ax1.set_xlim(curr_time - WINDOW_SECONDS, curr_time)
+        # --- Data Handling & Plotting ---
+        if current_state == SAMPLING:
+            x_data.append(t)
+            y_data.append(a)
 
-        # --- Frequency Domain Plot ---
-        if len(y_data) == MAX_SAMPLES:
-            # Windowing function to reduce spectral leakage
-            # Hanning window is good for general purpose
-            window = np.hanning(MAX_SAMPLES)
-            y_windowed = np.array(y_data) * window
+            # Rolling buffer is implicitly handled by clearing data
+            if len(x_data) > MAX_SAMPLES:
+                x_data.pop(0)
+                y_data.pop(0)
 
-            yf = rfft(y_windowed)
-            xf = rfftfreq(MAX_SAMPLES, DT)
-            fft_magnitude = np.abs(yf)
+            # --- Time Domain Plot ---
+            line.set_data(x_data, y_data)
+            cadence_text.set_text(f"Simulated Input: {actual_cadence:.1f} SPM")
 
-            # Zero out DC component (Gravity/Offset) for scaling
-            fft_magnitude[0] = 0
+            if x_data:
+                ax1.set_xlim(x_data[0], x_data[0] + WINDOW_SECONDS)
 
-            fft_line.set_data(xf, fft_magnitude)
+            # --- Frequency Domain Plot ---
+            # Run FFT only when we have a full buffer
+            if len(y_data) == MAX_SAMPLES:
+                window = np.hanning(MAX_SAMPLES)
+                y_windowed = np.array(y_data) * window
 
-            # Smart autoscale focusing on the running frequency range
-            relevant_indices = np.where((xf > 1.0) & (xf < 5.0))
-            if len(relevant_indices[0]) > 0:
-                local_max = np.max(fft_magnitude[relevant_indices])
-                ax2.set_ylim(0, local_max * 1.2)
+                yf = rfft(y_windowed)
+                xf = rfftfreq(MAX_SAMPLES, DT)
+                fft_magnitude = np.abs(yf)
+                fft_magnitude[0] = 0
 
-        return line, fft_line, cadence_text
+                fft_line.set_data(xf, fft_magnitude)
+
+                # --- Find and Display Dominant Frequency ---
+                min_freq_idx = np.where(xf >= 1.0)[0][0]
+                max_freq_idx = np.where(xf <= 5.0)[0][-1]
+
+                peak_idx = np.argmax(fft_magnitude[min_freq_idx:max_freq_idx]) + min_freq_idx
+                dominant_freq = xf[peak_idx]
+                peak_magnitude = fft_magnitude[peak_idx]
+
+                peak_line.set_data([dominant_freq, dominant_freq], [0, peak_magnitude])
+                peak_text.set_position((dominant_freq, peak_magnitude))
+                peak_text.set_text(f"{dominant_freq*60:.1f} SPM")
+
+                # Smart autoscale
+                relevant_indices = np.where((xf > 1.0) & (xf < 5.0))
+                if len(relevant_indices[0]) > 0:
+                    local_max = np.max(fft_magnitude[relevant_indices])
+                    ax2.set_ylim(0, local_max * 1.2 + 1e-9)
+
+        return line, fft_line, peak_line, peak_text, cadence_text, state_text
 
     ani = FuncAnimation(
         fig,
