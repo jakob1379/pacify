@@ -16,7 +16,7 @@ dependencies:
   bloc: ^9.0.0
 
   # Dependency Injection
-  get_it: ^8.2.0
+  get_it: ^9.1.1
   injectable: ^2.4.4
 
   # Local Storage
@@ -43,15 +43,15 @@ dependencies:
   dartz: ^0.10.1
 
   # Navigation
-  go_router: ^14.6.2
+  go_router: ^17.0.0
 
   # UI & Hooks
-  flutter_hooks: ^0.20.5
-  formz: ^0.7.0
+  flutter_hooks: ^0.21.3+1
+  formz: ^0.8.0
   flutter_screenutil: ^5.9.3
   
   # Environment & Configuration
-  envied: ^0.5.4+1
+  envied: ^1.3.1
   
   cupertino_icons: ^1.0.8
 
@@ -68,7 +68,7 @@ dev_dependencies:
   freezed: ^2.5.2
 
   # Environment & Configuration
-  envied_generator: ^0.5.4+1
+  envied_generator: ^1.1.1
   
   # Native Splash Screen
   flutter_native_splash: ^2.4.1

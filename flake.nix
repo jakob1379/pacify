@@ -12,11 +12,8 @@
           buildInputs = with pkgs; [
             gnumake
             flutter
+            prek
           ];
-
-          LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath [
-          ]}:$LD_LIBRARY_PATH";
-
 
           shellHook = ''
             '';

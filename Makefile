@@ -72,5 +72,3 @@ build-ios:
 
 build-web:
 	flutter build web --release
-
-
