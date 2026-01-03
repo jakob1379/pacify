@@ -41,6 +41,13 @@
 			<string>UIInterfaceOrientationLandscapeLeft</string>
 			<string>UIInterfaceOrientationLandscapeRight</string>
 		</array>
+		<key>NSMotionUsageDescription</key>
+		<string>This app needs access to your motion data to calculate your cadence.</string>
+		<key>UIBackgroundModes</key>
+		<array>
+			<string>processing</string>
+			<string>fetch</string>
+		</array>
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
