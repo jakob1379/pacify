@@ -25,9 +25,16 @@ The project includes a Nix flake for reproducible development environments:
 nix develop
 ```
 
-The flake includes Android SDK, Flutter, Java JDK, and Android Studio. To enable Android emulator support, modify `flake.nix`:
-- Set `includeEmulator = true`
-- Set `includeSystemImages = true`
+The flake includes:
+- Android SDK with API 36 and 35
+- Android emulator (version 35.3.11) and system images (Google APIs Playstore)
+- Flutter, Java JDK 17, Android Studio, and Gradle
+- All necessary dependencies for Android development
+
+To customize the environment (e.g., change platform versions, add NDK), modify `flake.nix`:
+- Update `platformVersions` array
+- Adjust `emulatorVersion` if needed
+- Set `includeNDK = true` for native development
 
 ## Setting Up
 
