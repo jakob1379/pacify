@@ -1,13 +1,12 @@
 import 'dart:async';
-import 'dart:math';
-import 'dart:typed_data';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
-import 'package:fftea/fftea.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:pacify/features/cadence_detector/data/services/sensor_service.dart';
+import 'package:pacify/features/cadence_detector/data/utils/amdf_processor.dart';
 import 'package:pacify/features/cadence_detector/data/utils/kalman_filter.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
@@ -15,195 +14,154 @@ part 'cadence_event.dart';
 part 'cadence_state.dart';
 
 const int sampleRate = 50;
-const int windowSize = 256; // ~5 seconds of data
-const int stepSize = 50; // Process every second (50 samples)
-const double minFrequencyHz = 1.0; // Minimum cadence frequency (60 SPM)
-const double maxFrequencyHz = 5.0; // Maximum cadence frequency (300 SPM)
-const double minBPM = 60.0;
-const double maxBPM = 300.0;
-const double samplingDurationSeconds = 5.0;
-const double pauseDurationSeconds = 15.0;
+const int windowSize = 256;
+const double pauseDurationSeconds = 15;
 
 class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
-  final SensorService sensorService;
-  StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
-  final List<double> _accelerometerData = [];
-  Timer? _timer;
-  late final KalmanFilter _kalmanFilter;
-  late final int _minFrequencyIndex;
-  late final int _maxFrequencyIndex;
-  String _currentState = 'sampling';
-  DateTime _lastStateChange = DateTime.now();
-  double _lastBpm = 150.0;
-
   CadenceBloc({required this.sensorService}) : super(CadenceInitial()) {
-    print('CadenceBloc constructor');
-    // Compute frequency indices for 1-5 Hz range
-    _minFrequencyIndex = (minFrequencyHz * windowSize / sampleRate).ceil();
-    _maxFrequencyIndex = (maxFrequencyHz * windowSize / sampleRate).floor();
-    // Ensure indices are within valid range (1 to windowSize/2 - 1)
-    if (_minFrequencyIndex < 1) _minFrequencyIndex = 1;
-    if (_maxFrequencyIndex > windowSize ~/ 2) _maxFrequencyIndex = windowSize ~/ 2;
-    
-    // Initialize Kalman filter with initial estimate 150 BPM, large uncertainty
-    _kalmanFilter = KalmanFilter(
-      initialEstimate: 150.0,
-      initialError: 100.0,
-      processNoise: 0.1,
-      measurementNoise: 10.0,
-    );
-    
     on<StartCadenceDetection>(_onStartCadenceDetection);
     on<StopCadenceDetection>(_onStopCadenceDetection);
     on<_NewAccelerometerData>(_onNewAccelerometerData);
   }
 
+  final SensorService sensorService;
+  final AmdfProcessor _amdfProcessor = AmdfProcessor(sampleRate.toDouble());
+  final ScalarKalmanFilter _kalmanFilter = ScalarKalmanFilter();
+  final List<double> _accelerometerData = [];
+
+  StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
+  String _samplingPhase = 'sampling';
+  DateTime _lastPhaseChange = DateTime.now();
+  double _lastBpm = 0;
+  double _lastRawBpm = 0;
+  double _lastConfidence = 0;
+  bool _hasReliableCadence = false;
+  List<double> _lastAmdfSimilarities = const [];
+  List<double> _lastBpmBins = const [];
+
   void _onStartCadenceDetection(
-      StartCadenceDetection event, Emitter<CadenceState> emit) {
+    StartCadenceDetection event,
+    Emitter<CadenceState> emit,
+  ) {
+    _resetDetection();
+    _startListening();
     if (Platform.isAndroid) {
       FlutterForegroundTask.startService(
         notificationTitle: 'Cadence Detection Active',
         notificationText: 'Tap to return to the app',
-        callback: () {
-          _startListening();
-        },
       );
-    } else {
-      _startListening();
     }
     emit(CadenceLoading());
   }
 
   void _onStopCadenceDetection(
-      StopCadenceDetection event, Emitter<CadenceState> emit) {
+    StopCadenceDetection event,
+    Emitter<CadenceState> emit,
+  ) {
     _stopListening();
-    if (Platform.isAndroid) {
-      FlutterForegroundTask.stopService();
-    }
+    if (Platform.isAndroid) FlutterForegroundTask.stopService();
     emit(CadenceInitial());
+  }
+
+  void _resetDetection() {
+    _samplingPhase = 'sampling';
+    _lastPhaseChange = DateTime.now();
+    _accelerometerData.clear();
+    _lastBpm = 0;
+    _lastRawBpm = 0;
+    _lastConfidence = 0;
+    _hasReliableCadence = false;
+    _lastAmdfSimilarities = const [];
+    _lastBpmBins = const [];
+    _kalmanFilter.reset();
   }
 
   void _startListening() {
     _accelerometerSubscription?.cancel();
-    _accelerometerSubscription =
-        sensorService.accelerometerStream.listen((data) {
-      add(_NewAccelerometerData(data));
-    });
+    _accelerometerSubscription = sensorService.accelerometerStream.listen(
+      (data) => add(_NewAccelerometerData(data)),
+    );
   }
 
   void _stopListening() {
     _accelerometerSubscription?.cancel();
-    _timer?.cancel();
+    _accelerometerSubscription = null;
   }
 
-  void _updateState() {
-    final now = DateTime.now();
-    final elapsedSeconds = now.difference(_lastStateChange).inSeconds.toDouble();
+  void _resumeSamplingIfDue() {
+    if (_samplingPhase != 'paused') return;
 
-    if (_currentState == 'sampling' && elapsedSeconds > samplingDurationSeconds) {
-      // Switch to paused
-      _currentState = 'paused';
-      _lastStateChange = now;
-      // Clear accelerometer data as in Python simulation
+    final now = DateTime.now();
+    final elapsedSeconds = now.difference(_lastPhaseChange).inMicroseconds /
+        Duration.microsecondsPerSecond;
+
+    if (elapsedSeconds >= pauseDurationSeconds) {
+      _samplingPhase = 'sampling';
+      _lastPhaseChange = now;
       _accelerometerData.clear();
-    } else if (_currentState == 'paused' && elapsedSeconds > pauseDurationSeconds) {
-      // Switch back to sampling
-      _currentState = 'sampling';
-      _lastStateChange = now;
+      _lastAmdfSimilarities = const [];
+      _lastBpmBins = const [];
     }
   }
 
   void _onNewAccelerometerData(
-      _NewAccelerometerData event, Emitter<CadenceState> emit) {
-    _updateState();
-    
-    if (_currentState == 'paused') {
-      // Emit paused state with last BPM and empty visualization
-      emit(CadenceLoaded(
-        _lastBpm,
-        timeSeriesData: const [],
-        frequencySpectrum: const [],
-        frequencyBins: const [],
-        currentState: 'paused',
-      ));
+    _NewAccelerometerData event,
+    Emitter<CadenceState> emit,
+  ) {
+    _resumeSamplingIfDue();
+    if (_samplingPhase == 'paused') {
+      emit(_loadedState());
       return;
     }
-    
-    final magnitude =
-        sqrt(pow(event.data.x, 2) + pow(event.data.y, 2) + pow(event.data.z, 2));
-    _accelerometerData.add(magnitude);
 
-    if (_accelerometerData.length >= windowSize) {
-      final stft = STFT(windowSize, Window.hanning(windowSize));
-      stft.run(Float64List.fromList(_accelerometerData), (spectogram) {
-        final frequencies = spectogram;
+    final data = event.data;
+    _accelerometerData.add(
+      sqrt(data.x * data.x + data.y * data.y + data.z * data.z),
+    );
+    if (_accelerometerData.length < windowSize) return;
 
-        // Find the dominant frequency within cadence range
-        var dominantFrequencyIndex = 0;
-        var maxAmplitude = 0.0;
-        for (var i = _minFrequencyIndex; i <= _maxFrequencyIndex; i++) {
-          if (i >= frequencies.length) break;
-          final amplitude = sqrt(pow(frequencies[i].x, 2) + pow(frequencies[i].y, 2));
-          if (amplitude > maxAmplitude) {
-            maxAmplitude = amplitude;
-            dominantFrequencyIndex = i;
-          }
-        }
+    final result = _amdfProcessor.analyze(_accelerometerData);
+    final visualization = _amdfProcessor.visualizationData(result.values);
+    _lastAmdfSimilarities = visualization.similarities;
+    _lastBpmBins = visualization.bpmBins;
+    _lastConfidence = result.confidence;
+    _hasReliableCadence =
+        result.confidence >= CadenceLoaded.minimumCadenceConfidence;
 
-        // If no dominant frequency found (should not happen), fallback to first index
-        if (dominantFrequencyIndex == 0) {
-          dominantFrequencyIndex = _minFrequencyIndex;
-        }
-
-        final dominantFrequency =
-            dominantFrequencyIndex * sampleRate / windowSize;
-        final bpm = dominantFrequency * 60;
-
-        // Apply Kalman filter for smoothing
-        final filteredBpm = _kalmanFilter.update(bpm);
-        final clampedBpm = filteredBpm.clamp(minBPM, maxBPM);
-        _lastBpm = clampedBpm;
-
-        // Prepare visualization data
-        final timeSeriesData = List<double>.from(_accelerometerData);
-        
-        // Compute frequency spectrum up to 10 Hz (like Python simulation)
-        const double maxVizFrequencyHz = 10.0;
-        final maxVizIndex = (maxVizFrequencyHz * windowSize / sampleRate).floor();
-        final effectiveMaxIndex = maxVizIndex.clamp(0, frequencies.length - 1);
-        
-        final frequencyBins = <double>[];
-        final frequencySpectrum = <double>[];
-        
-        for (var i = 0; i <= effectiveMaxIndex; i++) {
-          final freqHz = i * sampleRate / windowSize;
-          final amplitude = sqrt(pow(frequencies[i].x, 2) + pow(frequencies[i].y, 2));
-          frequencyBins.add(freqHz);
-          frequencySpectrum.add(amplitude);
-        }
-        
-        emit(CadenceLoaded(
-          clampedBpm,
-          timeSeriesData: timeSeriesData,
-          frequencySpectrum: frequencySpectrum,
-          frequencyBins: frequencyBins,
-          currentState: _currentState,
-        ));
-
-        // Keep sliding window: remove oldest stepSize samples
-        if (_accelerometerData.length > stepSize) {
-          _accelerometerData.removeRange(0, stepSize);
-        } else {
-          _accelerometerData.clear();
-        }
-      });
+    if (_hasReliableCadence) {
+      _lastRawBpm = result.bpm;
+      _lastBpm = _kalmanFilter.update(
+        result.bpm,
+        observedAt: event.data.timestamp,
+      );
+    } else {
+      // A flat or noisy AMDF has no trustworthy period. Do not let its
+      // arbitrary minimum update the Kalman state.
+      _lastRawBpm = 0;
     }
+
+    // A completed window ends the sampling burst. Keep its result visible
+    // during the pause, then collect a fresh window on resume.
+    _samplingPhase = 'paused';
+    _lastPhaseChange = DateTime.now();
+    emit(_loadedState());
   }
+
+  CadenceLoaded _loadedState() => CadenceLoaded(
+        _hasReliableCadence ? _lastBpm : 0,
+        rawBpm: _hasReliableCadence ? _lastRawBpm : 0,
+        uncertainty: _kalmanFilter.uncertainty,
+        confidence: _lastConfidence,
+        timeSeriesData: List<double>.from(_accelerometerData),
+        frequencySpectrum: List<double>.from(_lastAmdfSimilarities),
+        frequencyBins: List<double>.from(_lastBpmBins),
+        currentState: _samplingPhase,
+      );
 
   @override
   Future<void> close() {
     _stopListening();
-    FlutterForegroundTask.stopService();
+    if (Platform.isAndroid) FlutterForegroundTask.stopService();
     return super.close();
   }
 }

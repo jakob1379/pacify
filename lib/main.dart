@@ -12,7 +12,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    print('MyApp build');
     // Start foreground task only on Android (required for background sensor reading)
     if (Platform.isAndroid) {
       startForegroundTask();
@@ -26,4 +25,3 @@ class MyApp extends StatelessWidget {
     );
   }
 }
-

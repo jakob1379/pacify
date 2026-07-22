@@ -31,7 +31,6 @@ class SimulatedSensorService extends SensorService {
       StreamController<AccelerometerEvent>.broadcast();
   Timer? _timer;
   
-  double _time = 0.0;
   double _currentCadence = (_targetCadenceLow + _targetCadenceHigh) / 2;
   double _phase = 0.0;
 
@@ -117,7 +116,6 @@ class SimulatedSensorService extends SensorService {
     final event = AccelerometerEvent(x, y, z, DateTime.now());
     _controller.add(event);
 
-    _time += _dt;
   }
 
   /// Clean up resources

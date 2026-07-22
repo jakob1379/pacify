@@ -1,61 +1,63 @@
-/// Simple 1D Kalman filter for scalar values.
-class KalmanFilter {
-  /// Current state estimate
-  double _x;
-  
-  /// Current estimate error covariance
-  double _p;
-  
-  /// Process noise covariance (how much we expect the true state to change)
-  final double _q;
-  
-  /// Measurement noise covariance (how much we trust the measurements)
-  final double _r;
-  
-  /// Kalman gain (computed each update)
-  double _k = 0.0;
-  
-  /// Constructor with initial estimate and noise parameters.
-  /// [initialEstimate]: initial state value
-  /// [initialError]: initial error variance (uncertainty)
-  /// [processNoise]: process noise covariance (Q)
-  /// [measurementNoise]: measurement noise covariance (R)
-  KalmanFilter({
-    required double initialEstimate,
-    required double initialError,
-    required double processNoise,
-    required double measurementNoise,
-  })  : _x = initialEstimate,
-        _p = initialError,
-        _q = processNoise,
-        _r = measurementNoise;
-  
-  /// Update the filter with a new measurement.
-  /// Returns the filtered estimate.
-  double update(double measurement) {
-    // Prediction update (state and covariance)
-    // For constant velocity model, we assume state doesn't change (x = x)
-    // But we increase uncertainty by process noise
-    _p = _p + _q;
-    
-    // Measurement update
-    _k = _p / (_p + _r); // Kalman gain
-    _x = _x + _k * (measurement - _x);
-    _p = (1 - _k) * _p;
-    
-    return _x;
+/// Time-aware scalar Kalman filter for cadence measurements.
+///
+/// The state model assumes cadence remains constant between samples while its
+/// uncertainty grows by [processNoisePerSecond] for every elapsed second.
+class ScalarKalmanFilter {
+  ScalarKalmanFilter({
+    double initialEstimate = 150,
+    double initialUncertainty = 5,
+    this.processNoisePerSecond = 0.5,
+    this.measurementNoise = 2,
+  })  : assert(initialUncertainty >= 0),
+        assert(processNoisePerSecond >= 0),
+        assert(measurementNoise > 0),
+        _estimate = initialEstimate,
+        _uncertainty = initialUncertainty;
+
+  final double processNoisePerSecond;
+  final double measurementNoise;
+
+  double _estimate;
+  double _uncertainty;
+  DateTime? _lastObservation;
+
+  double get estimate => _estimate;
+  double get uncertainty => _uncertainty;
+
+  /// Predicts uncertainty to [observedAt], then incorporates [measurement].
+  double update(double measurement, {DateTime? observedAt}) {
+    if (!measurement.isFinite) {
+      throw ArgumentError.value(measurement, 'measurement', 'must be finite');
+    }
+
+    final observation = observedAt ?? DateTime.now();
+    var elapsedSeconds = 0.0;
+    if (_lastObservation != null && observation.isAfter(_lastObservation!)) {
+      elapsedSeconds =
+          observation.difference(_lastObservation!).inMicroseconds /
+              Duration.microsecondsPerSecond;
+    }
+    if (_lastObservation == null || observation.isAfter(_lastObservation!)) {
+      _lastObservation = observation;
+    }
+
+    _uncertainty += processNoisePerSecond * elapsedSeconds;
+    final gain = _uncertainty / (_uncertainty + measurementNoise);
+    _estimate += gain * (measurement - _estimate);
+    _uncertainty *= 1 - gain;
+    return _estimate;
   }
-  
-  /// Get current estimate.
-  double get estimate => _x;
-  
-  /// Reset filter with new initial values.
-  void reset({
-    required double initialEstimate,
-    required double initialError,
-  }) {
-    _x = initialEstimate;
-    _p = initialError;
-    _k = 0.0;
+
+  void reset({double initialEstimate = 150, double initialUncertainty = 5}) {
+    if (initialUncertainty < 0) {
+      throw ArgumentError.value(
+        initialUncertainty,
+        'initialUncertainty',
+        'must not be negative',
+      );
+    }
+    _estimate = initialEstimate;
+    _uncertainty = initialUncertainty;
+    _lastObservation = null;
   }
 }
