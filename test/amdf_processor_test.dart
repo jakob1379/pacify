@@ -21,7 +21,7 @@ void main() {
   });
 
   test('keeps interpolation accurate near the search boundaries', () {
-    for (final targetBpm in [120.0, 235.0, 240.0]) {
+    for (final targetBpm in [121.0, 235.0, 239.0]) {
       final samples = List<double>.generate(
         256,
         (index) => sin(2 * pi * targetBpm / 60 * index / sampleRate),
@@ -31,6 +31,15 @@ void main() {
 
       expect(result.bpm, closeTo(targetBpm, 2), reason: '$targetBpm BPM');
     }
+  });
+
+  test('prefers the first valley over a lower subharmonic', () {
+    final samples = List<double>.generate(
+      256,
+      (index) => sin(2 * pi * 240 / 60 * index / sampleRate),
+    );
+
+    expect(processor.analyze(samples).bestLag, lessThan(20));
   });
 
   test('assigns zero confidence to a stationary signal', () {

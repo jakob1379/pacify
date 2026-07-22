@@ -6,8 +6,7 @@ import 'sensor_service.dart';
 /// Simulated sensor service that generates accelerometer data similar to
 /// the Python exploration simulation.
 class SimulatedSensorService extends SensorService {
-  static const double _sampleRate = 50.0; // 50 Hz
-  static const double _dt = 1.0 / _sampleRate; // 0.02 seconds per sample
+  static const double _dt = 1.0 / SensorService.samplingRate;
   static const double _targetCadenceLow = 170.0;
   static const double _targetCadenceHigh = 180.0;
   static const double _impactMagnitude = 12.0;
@@ -27,10 +26,11 @@ class SimulatedSensorService extends SensorService {
     }
     return sum - 6.0;
   }
+
   final StreamController<AccelerometerEvent> _controller =
       StreamController<AccelerometerEvent>.broadcast();
   Timer? _timer;
-  
+
   double _currentCadence = (_targetCadenceLow + _targetCadenceHigh) / 2;
   double _phase = 0.0;
 
@@ -39,7 +39,10 @@ class SimulatedSensorService extends SensorService {
     _controller.onListen = () {
       if (_timer == null || !_timer!.isActive) {
         _timer = Timer.periodic(
-          Duration(milliseconds: (1000 / _sampleRate).round()),
+          Duration(
+            microseconds:
+                Duration.microsecondsPerSecond ~/ SensorService.samplingRate,
+          ),
           (_) => _generateSample(),
         );
       }
@@ -58,7 +61,10 @@ class SimulatedSensorService extends SensorService {
   Future<void> startListening() async {
     if (_timer == null || !_timer!.isActive) {
       _timer = Timer.periodic(
-        Duration(milliseconds: (1000 / _sampleRate).round()),
+        Duration(
+          microseconds:
+              Duration.microsecondsPerSecond ~/ SensorService.samplingRate,
+        ),
         (_) => _generateSample(),
       );
     }
@@ -70,13 +76,13 @@ class SimulatedSensorService extends SensorService {
     _timer = null;
   }
 
-
-
   void _generateSample() {
     // 1. Simulate Natural Cadence Drift (Random Walk)
-    final cadenceDrift = _random.nextDouble() * 2 * _cadenceDriftRange - _cadenceDriftRange;
+    final cadenceDrift =
+        _random.nextDouble() * 2 * _cadenceDriftRange - _cadenceDriftRange;
     _currentCadence += cadenceDrift;
-    _currentCadence = _currentCadence.clamp(_targetCadenceLow, _targetCadenceHigh);
+    _currentCadence =
+        _currentCadence.clamp(_targetCadenceLow, _targetCadenceHigh);
 
     // Convert Cadence (SPM) to Frequency (Hz)
     final freqHz = _currentCadence / 60.0;
@@ -87,14 +93,15 @@ class SimulatedSensorService extends SensorService {
 
     // 3. Generate Waveform using accumulated phase
     final fundamental = sin(_phase);
-    final harmonic = _harmonicCoefficient * sin(2 * _phase + _harmonicPhaseShift);
+    final harmonic =
+        _harmonicCoefficient * sin(2 * _phase + _harmonicPhaseShift);
 
     // 4. Add Sensor/Movement Noise
     final noise = _nextGaussian() * _noiseStdDev;
 
     // 5. Combine components
-    double acceleration = _gravityRemovedBaseline + 
-        (fundamental + harmonic) * (_impactMagnitude / 1.5) + 
+    double acceleration = _gravityRemovedBaseline +
+        (fundamental + harmonic) * (_impactMagnitude / 1.5) +
         noise;
 
     // 6. Rectify negatives slightly (as in Python simulation)
@@ -115,7 +122,6 @@ class SimulatedSensorService extends SensorService {
 
     final event = AccelerometerEvent(x, y, z, DateTime.now());
     _controller.add(event);
-
   }
 
   /// Clean up resources

@@ -3,33 +3,29 @@ import 'package:sensors_plus/sensors_plus.dart';
 import 'simulated_sensor_service.dart';
 
 abstract class SensorService {
+  static const int samplingRate = 50;
+
   Stream<AccelerometerEvent> get accelerometerStream;
   Future<void> startListening();
   void stopListening();
 
   /// Factory method to create appropriate sensor service
   /// [useSimulation] - if true, uses simulated data; if false, uses real device sensors
-  static SensorService create({
-    bool useSimulation = false,
-    int samplingRate = 50,
-  }) {
+  static SensorService create({bool useSimulation = false}) {
     if (useSimulation) {
       return SimulatedSensorService();
     }
-    return SensorServiceImpl(samplingRate: samplingRate);
+    return SensorServiceImpl();
   }
 }
 
 class SensorServiceImpl implements SensorService {
-  SensorServiceImpl({this.samplingRate = 50}) : assert(samplingRate > 0);
-
-  final int samplingRate;
-
   @override
   Stream<AccelerometerEvent> get accelerometerStream =>
       accelerometerEventStream(
         samplingPeriod: Duration(
-          microseconds: (Duration.microsecondsPerSecond / samplingRate).round(),
+          microseconds:
+              Duration.microsecondsPerSecond ~/ SensorService.samplingRate,
         ),
       );
 

@@ -13,7 +13,6 @@ import 'package:sensors_plus/sensors_plus.dart';
 part 'cadence_event.dart';
 part 'cadence_state.dart';
 
-const int sampleRate = 50;
 const int windowSize = 256;
 const double pauseDurationSeconds = 15;
 
@@ -25,11 +24,11 @@ class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
   }
 
   final SensorService sensorService;
-  final AmdfProcessor _amdfProcessor = AmdfProcessor(sampleRate.toDouble());
   final ScalarKalmanFilter _kalmanFilter = ScalarKalmanFilter();
   final List<double> _accelerometerData = [];
 
   StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
+  DateTime? _firstSampleTimestamp;
   String _samplingPhase = 'sampling';
   DateTime _lastPhaseChange = DateTime.now();
   double _lastBpm = 0;
@@ -39,12 +38,17 @@ class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
   List<double> _lastAmdfSimilarities = const [];
   List<double> _lastBpmBins = const [];
 
-  void _onStartCadenceDetection(
+  Future<void> _onStartCadenceDetection(
     StartCadenceDetection event,
     Emitter<CadenceState> emit,
-  ) {
+  ) async {
     _resetDetection();
-    _startListening();
+    try {
+      await _startListening();
+    } catch (_) {
+      emit(const CadenceError('Unable to start cadence detection'));
+      return;
+    }
     if (Platform.isAndroid) {
       FlutterForegroundTask.startService(
         notificationTitle: 'Cadence Detection Active',
@@ -54,11 +58,11 @@ class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
     emit(CadenceLoading());
   }
 
-  void _onStopCadenceDetection(
+  Future<void> _onStopCadenceDetection(
     StopCadenceDetection event,
     Emitter<CadenceState> emit,
-  ) {
-    _stopListening();
+  ) async {
+    await _stopListening();
     if (Platform.isAndroid) FlutterForegroundTask.stopService();
     emit(CadenceInitial());
   }
@@ -67,6 +71,7 @@ class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
     _samplingPhase = 'sampling';
     _lastPhaseChange = DateTime.now();
     _accelerometerData.clear();
+    _firstSampleTimestamp = null;
     _lastBpm = 0;
     _lastRawBpm = 0;
     _lastConfidence = 0;
@@ -76,16 +81,24 @@ class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
     _kalmanFilter.reset();
   }
 
-  void _startListening() {
-    _accelerometerSubscription?.cancel();
+  Future<void> _startListening() async {
+    await _accelerometerSubscription?.cancel();
     _accelerometerSubscription = sensorService.accelerometerStream.listen(
       (data) => add(_NewAccelerometerData(data)),
     );
+    try {
+      await sensorService.startListening();
+    } catch (_) {
+      await _accelerometerSubscription?.cancel();
+      _accelerometerSubscription = null;
+      rethrow;
+    }
   }
 
-  void _stopListening() {
-    _accelerometerSubscription?.cancel();
+  Future<void> _stopListening() async {
+    await _accelerometerSubscription?.cancel();
     _accelerometerSubscription = null;
+    sensorService.stopListening();
   }
 
   void _resumeSamplingIfDue() {
@@ -99,6 +112,7 @@ class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
       _samplingPhase = 'sampling';
       _lastPhaseChange = now;
       _accelerometerData.clear();
+      _firstSampleTimestamp = null;
       _lastAmdfSimilarities = const [];
       _lastBpmBins = const [];
     }
@@ -115,13 +129,15 @@ class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
     }
 
     final data = event.data;
+    _firstSampleTimestamp ??= data.timestamp;
     _accelerometerData.add(
       sqrt(data.x * data.x + data.y * data.y + data.z * data.z),
     );
     if (_accelerometerData.length < windowSize) return;
 
-    final result = _amdfProcessor.analyze(_accelerometerData);
-    final visualization = _amdfProcessor.visualizationData(result.values);
+    final processor = AmdfProcessor(_effectiveSampleRate(data.timestamp));
+    final result = processor.analyze(_accelerometerData);
+    final visualization = processor.visualizationData(result.values);
     _lastAmdfSimilarities = visualization.similarities;
     _lastBpmBins = visualization.bpmBins;
     _lastConfidence = result.confidence;
@@ -158,9 +174,23 @@ class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
         currentState: _samplingPhase,
       );
 
+  double _effectiveSampleRate(DateTime lastTimestamp) {
+    final firstTimestamp = _firstSampleTimestamp;
+    if (firstTimestamp == null || _accelerometerData.length < 2) {
+      return SensorService.samplingRate.toDouble();
+    }
+
+    final elapsedMicroseconds =
+        lastTimestamp.difference(firstTimestamp).inMicroseconds;
+    if (elapsedMicroseconds <= 0) return SensorService.samplingRate.toDouble();
+    return (_accelerometerData.length - 1) *
+        Duration.microsecondsPerSecond /
+        elapsedMicroseconds;
+  }
+
   @override
-  Future<void> close() {
-    _stopListening();
+  Future<void> close() async {
+    await _stopListening();
     if (Platform.isAndroid) FlutterForegroundTask.stopService();
     return super.close();
   }
