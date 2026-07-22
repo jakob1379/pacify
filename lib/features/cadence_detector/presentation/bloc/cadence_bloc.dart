@@ -18,9 +18,10 @@ const double pauseDurationSeconds = 15;
 
 class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
   CadenceBloc({required this.sensorService}) : super(CadenceInitial()) {
-    on<StartCadenceDetection>(_onStartCadenceDetection);
-    on<StopCadenceDetection>(_onStopCadenceDetection);
-    on<_NewAccelerometerData>(_onNewAccelerometerData);
+    on<CadenceEvent>(
+      _onCadenceEvent,
+      transformer: (events, mapper) => events.asyncExpand(mapper),
+    );
   }
 
   final SensorService sensorService;
@@ -37,6 +38,19 @@ class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
   bool _hasReliableCadence = false;
   List<double> _lastAmdfSimilarities = const [];
   List<double> _lastBpmBins = const [];
+
+  Future<void> _onCadenceEvent(
+    CadenceEvent event,
+    Emitter<CadenceState> emit,
+  ) async {
+    if (event is StartCadenceDetection) {
+      await _onStartCadenceDetection(event, emit);
+    } else if (event is StopCadenceDetection) {
+      await _onStopCadenceDetection(event, emit);
+    } else if (event is _NewAccelerometerData) {
+      _onNewAccelerometerData(event, emit);
+    }
+  }
 
   Future<void> _onStartCadenceDetection(
     StartCadenceDetection event,
@@ -101,34 +115,36 @@ class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
     sensorService.stopListening();
   }
 
-  void _resumeSamplingIfDue() {
-    if (_samplingPhase != 'paused') return;
+  bool _resumeSamplingIfDue(DateTime sampleTimestamp) {
+    if (_samplingPhase != 'paused') return false;
 
-    final now = DateTime.now();
-    final elapsedSeconds = now.difference(_lastPhaseChange).inMicroseconds /
-        Duration.microsecondsPerSecond;
+    final elapsedSeconds =
+        sampleTimestamp.difference(_lastPhaseChange).inMicroseconds /
+            Duration.microsecondsPerSecond;
 
     if (elapsedSeconds >= pauseDurationSeconds) {
       _samplingPhase = 'sampling';
-      _lastPhaseChange = now;
+      _lastPhaseChange = sampleTimestamp;
       _accelerometerData.clear();
       _firstSampleTimestamp = null;
       _lastAmdfSimilarities = const [];
       _lastBpmBins = const [];
+      return true;
     }
+    return false;
   }
 
   void _onNewAccelerometerData(
     _NewAccelerometerData event,
     Emitter<CadenceState> emit,
   ) {
-    _resumeSamplingIfDue();
+    final data = event.data;
+    if (_resumeSamplingIfDue(data.timestamp)) emit(_loadedState());
     if (_samplingPhase == 'paused') {
       emit(_loadedState());
       return;
     }
 
-    final data = event.data;
     _firstSampleTimestamp ??= data.timestamp;
     _accelerometerData.add(
       sqrt(data.x * data.x + data.y * data.y + data.z * data.z),
@@ -159,7 +175,7 @@ class CadenceBloc extends Bloc<CadenceEvent, CadenceState> {
     // A completed window ends the sampling burst. Keep its result visible
     // during the pause, then collect a fresh window on resume.
     _samplingPhase = 'paused';
-    _lastPhaseChange = DateTime.now();
+    _lastPhaseChange = data.timestamp;
     emit(_loadedState());
   }
 

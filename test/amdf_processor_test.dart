@@ -39,7 +39,11 @@ void main() {
       (index) => sin(2 * pi * 240 / 60 * index / sampleRate),
     );
 
-    expect(processor.analyze(samples).bestLag, lessThan(20));
+    final result = processor.analyze(samples);
+
+    expect(result.bestLag, inInclusiveRange(12, 13));
+    expect(result.bpm, closeTo(240, 2));
+    expect(result.confidence, greaterThan(AmdfProcessor.minimumConfidence));
   });
 
   test('assigns zero confidence to a stationary signal', () {
