@@ -70,7 +70,7 @@ ThemeData _pacifyTheme(Brightness brightness) {
             : const Color(0xFFCBD5E1),
         surfaceContainerHighest: isDark
             ? const Color(0xFF475569)
-            : const Color(0xFFCBD5E1),
+            : const Color(0xFF94A3B8),
         outline: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
         outlineVariant: isDark
             ? const Color(0xFF334155)

@@ -20,82 +20,94 @@ void main() {
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
+    try {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: CadenceDashboard(state: samplingState)),
+        ),
+      );
 
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(body: CadenceDashboard(state: samplingState)),
-      ),
-    );
+      expect(find.text('Pacify'), findsOneWidget);
+      expect(find.text('Measuring now'), findsOneWidget);
+      expect(find.text('152'), findsOneWidget);
+      expect(find.text('BPM'), findsOneWidget);
+      expect(find.text('Confidence'), findsOneWidget);
+      expect(find.text('72%'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel('Monitoring phase: Measuring now'),
+        findsOneWidget,
+      );
+      expect(
+          find.bySemanticsLabel('Pace: 152 beats per minute'), findsOneWidget);
+      expect(find.bySemanticsLabel('Confidence: 72 percent'), findsOneWidget);
 
-    expect(find.text('Pacify'), findsOneWidget);
-    expect(find.text('Measuring now'), findsOneWidget);
-    expect(find.text('152'), findsOneWidget);
-    expect(find.text('BPM'), findsOneWidget);
-    expect(find.text('Confidence'), findsOneWidget);
-    expect(find.text('72%'), findsOneWidget);
-    expect(
-      find.bySemanticsLabel('Monitoring phase: Measuring now'),
-      findsOneWidget,
-    );
-    expect(find.bySemanticsLabel('Pace: 152 beats per minute'), findsOneWidget);
-    expect(find.bySemanticsLabel('Confidence: 72 percent'), findsOneWidget);
-
-    final progress = tester.widget<LinearProgressIndicator>(
-      find.byType(LinearProgressIndicator),
-    );
-    expect(progress.value, 0.72);
-    expect(find.text('Motion trace'), findsNothing);
-    expect(find.text('Tune detector settings'), findsNothing);
-    expect(find.text('Adaptive cadence'), findsNothing);
-    semantics.dispose();
+      final progress = tester.widget<LinearProgressIndicator>(
+        find.byType(LinearProgressIndicator),
+      );
+      expect(progress.value, 0.72);
+      expect(find.text('Motion trace'), findsNothing);
+      expect(find.text('Tune detector settings'), findsNothing);
+      expect(find.text('Adaptive cadence'), findsNothing);
+    } finally {
+      semantics.dispose();
+    }
   });
 
   testWidgets('paused dashboard retains pace between samples', (tester) async {
     final semantics = tester.ensureSemantics();
-    const pausedState = CadenceLoaded(
-      147.6,
-      confidence: 0.43,
-      currentState: 'paused',
-    );
+    try {
+      const pausedState = CadenceLoaded(
+        147.6,
+        confidence: 0.43,
+        currentState: 'paused',
+      );
 
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(body: CadenceDashboard(state: pausedState)),
-      ),
-    );
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: CadenceDashboard(state: pausedState)),
+        ),
+      );
 
-    expect(find.text('Between samples'), findsOneWidget);
-    expect(find.text('Measuring now'), findsNothing);
-    expect(find.text('148'), findsOneWidget);
-    expect(find.text('BPM'), findsOneWidget);
-    expect(find.text('43%'), findsOneWidget);
-    expect(
-      find.bySemanticsLabel('Monitoring phase: Between samples'),
-      findsOneWidget,
-    );
-    expect(find.bySemanticsLabel('Pace: 148 beats per minute'), findsOneWidget);
-    semantics.dispose();
+      expect(find.text('Between samples'), findsOneWidget);
+      expect(find.text('Measuring now'), findsNothing);
+      expect(find.text('148'), findsOneWidget);
+      expect(find.text('BPM'), findsOneWidget);
+      expect(find.text('43%'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel('Monitoring phase: Between samples'),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel('Pace: 148 beats per minute'),
+        findsOneWidget,
+      );
+    } finally {
+      semantics.dispose();
+    }
   });
 
   testWidgets('low-confidence samples do not report a pace', (tester) async {
     final semantics = tester.ensureSemantics();
-    const stillState = CadenceLoaded(
-      199,
-      confidence: 0.09,
-      currentState: 'sampling',
-    );
+    try {
+      const stillState = CadenceLoaded(
+        199,
+        confidence: 0.09,
+        currentState: 'sampling',
+      );
 
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(body: CadenceDashboard(state: stillState)),
-      ),
-    );
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: CadenceDashboard(state: stillState)),
+        ),
+      );
 
-    expect(find.text('--'), findsOneWidget);
-    expect(find.text('199'), findsNothing);
-    expect(find.text('9%'), findsOneWidget);
-    expect(find.bySemanticsLabel('Pace unavailable'), findsOneWidget);
-    semantics.dispose();
+      expect(find.text('--'), findsOneWidget);
+      expect(find.text('199'), findsNothing);
+      expect(find.text('9%'), findsOneWidget);
+      expect(find.bySemanticsLabel('Pace unavailable'), findsOneWidget);
+    } finally {
+      semantics.dispose();
+    }
   });
 
   testWidgets('debug settings icon opens the existing diagnostic page', (
