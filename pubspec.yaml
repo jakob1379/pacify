@@ -55,7 +55,6 @@ dependencies:
   
   cupertino_icons: ^1.0.8
   sensors_plus: ^7.0.0
-  fftea: ^1.5.0+1
   flutter_foreground_task: ^9.1.0
   fl_chart: ^0.69.0
 

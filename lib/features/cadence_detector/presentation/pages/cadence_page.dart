@@ -10,11 +10,10 @@ class CadencePage extends StatelessWidget {
   const CadencePage({super.key});
 
   // Set to true to use simulated sensor data (for testing without real device)
-  static const bool _useSimulation = true;
+  static const bool _useSimulation = false;
 
   @override
   Widget build(BuildContext context) {
-    print('CadencePage build');
     final scaffold = Scaffold(
       appBar: AppBar(
         title: const Text('Cadence Detector'),
@@ -115,7 +114,7 @@ class CadencePage extends StatelessWidget {
                 gridData: FlGridData(show: true),
                 borderData: FlBorderData(show: true),
                 minX: 0,
-                maxX: state.timeSeriesData.length > 0 ? state.timeSeriesData.length - 1.0 : 0,
+                maxX: state.timeSeriesData.isNotEmpty ? state.timeSeriesData.length - 1.0 : 0,
                 minY: state.timeSeriesData.isNotEmpty ? state.timeSeriesData.reduce((a, b) => a < b ? a : b) - 1 : -10,
                 maxY: state.timeSeriesData.isNotEmpty ? state.timeSeriesData.reduce((a, b) => a > b ? a : b) + 1 : 10,
               ),
