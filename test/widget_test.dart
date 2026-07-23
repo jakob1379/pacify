@@ -113,7 +113,7 @@ void main() {
   testWidgets('debug settings icon opens the existing diagnostic page', (
     tester,
   ) async {
-    final bloc = CadenceBloc(sensorService: _FakeSensorService());
+    final CadenceBloc bloc = _TestCadenceBloc(samplingState);
     addTearDown(bloc.close);
 
     await tester.pumpWidget(
@@ -135,6 +135,10 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('Cadence Debug'), findsOneWidget);
+    expect(find.text('Filtered BPM'), findsOneWidget);
+    expect(find.text('152.4'), findsOneWidget);
+    expect(find.text('Raw BPM'), findsOneWidget);
+    expect(find.text('151.1'), findsOneWidget);
   });
 
   testWidgets('app provides system-controlled light and dark themes', (
@@ -207,6 +211,13 @@ Future<MaterialApp> _appDefinition(WidgetTester tester) async {
     ),
   );
   return app;
+}
+
+class _TestCadenceBloc extends CadenceBloc {
+  _TestCadenceBloc(CadenceState state)
+      : super(sensorService: _FakeSensorService()) {
+    emit(state);
+  }
 }
 
 class _FakeSensorService implements SensorService {
